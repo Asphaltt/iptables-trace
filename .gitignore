@@ -1,0 +1,11 @@
+
+.vscode/
+
+*_bpf*
+
+/iptables-trace
+
+/kernel/.iptables-trace*
+/kernel/iptables-trace.mod*
+/kernel/iptables-trace.*o
+/kernel/*odule*
