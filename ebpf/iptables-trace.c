@@ -79,6 +79,11 @@ __ipt_do_table_trace(struct pt_regs *ctx,
     char *chainname,
     unsigned int rulenum)
 {
+    u64 pid_tgid = bpf_get_current_pid_tgid();
+    void *val = bpf_map_lookup_elem(&skbtracer_ipt, &pid_tgid);
+    if (!val)
+        return BPF_OK;
+
     struct event_t *event = GET_EVENT_BUF();
     if (!event)
         return BPF_OK;
