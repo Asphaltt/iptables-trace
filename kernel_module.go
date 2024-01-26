@@ -9,7 +9,7 @@ import (
 	"github.com/cilium/ebpf"
 )
 
-const bpffsRoot = "/sys/fs/bpf"
+const bpffsRoot = "/sys/fs/bpf/iptables-trace"
 
 func b2int(b bool) int {
 	if b {
@@ -46,16 +46,19 @@ func unpinAll(progs ...*ebpf.Program) {
 // }
 
 func insmod(isKernelVersionGte_5_16 bool, kprobe, kretprobe, trace *ebpf.Program) error {
+	_ = os.MkdirAll(bpffsRoot, 0o755)
 	entryPath, err := pinProg(kprobe, "entry")
 	if err != nil {
 		return fmt.Errorf("failed to pin entry bpf prog: %w", err)
 	}
 	exitPath, err := pinProg(kretprobe, "exit")
 	if err != nil {
+		unpinAll(kprobe)
 		return fmt.Errorf("failed to pin exit bpf prog: %w", err)
 	}
 	tracePath, err := pinProg(trace, "trace")
 	if err != nil {
+		unpinAll(kprobe, kretprobe)
 		return fmt.Errorf("failed to pin trace bpf prog: %w", err)
 	}
 
@@ -70,6 +73,7 @@ func insmod(isKernelVersionGte_5_16 bool, kprobe, kretprobe, trace *ebpf.Program
 		fmt.Sprintf("version_gte_5_16=%d", b2int(isKernelVersionGte_5_16)),
 	).CombinedOutput()
 	if err != nil {
+		unpinAll(kprobe, kretprobe, trace)
 		return fmt.Errorf("failed to insmod iptables-trace.ko: %w\n%s", err, string(out))
 	}
 

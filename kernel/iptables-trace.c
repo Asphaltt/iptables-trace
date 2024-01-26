@@ -57,9 +57,9 @@ static struct kprobe kp_nf_log_trace = {
     .flags = KPROBE_FLAG_FTRACE,
 };
 
-static struct bpf_prog *__bpf_prog_entry __read_mostly = NULL,
-                       *__bpf_prog_exit __read_mostly = NULL,
-                       *__bpf_prog_trace __read_mostly = NULL;
+static struct bpf_prog *__ipt_bpf_prog_entry __read_mostly = NULL,
+                       *__ipt_bpf_prog_exit __read_mostly = NULL,
+                       *__ipt_bpf_prog_trace __read_mostly = NULL;
 
 // static int __bpf_check_ufd(struct bpf_prog **prog, u32 ufd)
 // {
@@ -75,17 +75,17 @@ static int __bpf_check_path(struct bpf_prog **prog, char *path)
 
 static bool __run_bpf_prog_entry(struct pt_regs *regs)
 {
-    return !!bpf_prog_run(__bpf_prog_entry, regs);
+    return !!bpf_prog_run(__ipt_bpf_prog_entry, regs);
 }
 
 static bool __run_bpf_prog_exit(struct pt_regs *regs)
 {
-    return !!bpf_prog_run(__bpf_prog_exit, regs);
+    return !!bpf_prog_run(__ipt_bpf_prog_exit, regs);
 }
 
 static bool __run_bpf_prog_trace(struct pt_regs *regs)
 {
-    return !!bpf_prog_run(__bpf_prog_trace, regs);
+    return !!bpf_prog_run(__ipt_bpf_prog_trace, regs);
 }
 
 static int __kprobe_prehandler_entry(struct kprobe *p, struct pt_regs *regs)
@@ -136,39 +136,39 @@ static int __init ipt_trace_init(void)
     // pr_info("[Y] entry_fd=%d exit_fd=%d trace_fd=%d version_gte_5_16=%d\n",
     //     bpf_prog_entry_fd, bpf_prog_exit_fd, bpf_prog_trace_fd, version_gte_5_16);
 
-    // if (0 != (ret = __bpf_check_ufd(&__bpf_prog_entry, bpf_prog_entry_fd))) {
+    // if (0 != (ret = __bpf_check_ufd(&__ipt_bpf_prog_entry, bpf_prog_entry_fd))) {
     //     pr_err("[X] iptables-trace, failed to get entry bpf prog, returned=%d\n", ret);
     //     return ret;
     // }
 
-    // if (0 != (ret = __bpf_check_ufd(&__bpf_prog_exit, bpf_prog_exit_fd))) {
+    // if (0 != (ret = __bpf_check_ufd(&__ipt_bpf_prog_exit, bpf_prog_exit_fd))) {
     //     pr_err("[X] iptables-trace, failed to get exit bpf prog, returned=%d\n", ret);
-    //     bpf_prog_put(__bpf_prog_entry);
+    //     bpf_prog_put(__ipt_bpf_prog_entry);
     //     return ret;
     // }
 
-    // if (0 != (ret = __bpf_check_ufd(&__bpf_prog_trace, bpf_prog_trace_fd))) {
+    // if (0 != (ret = __bpf_check_ufd(&__ipt_bpf_prog_trace, bpf_prog_trace_fd))) {
     //     pr_err("[X] iptables-trace, failed to get trace bpf prog, returned=%d\n", ret);
-    //     bpf_prog_put(__bpf_prog_entry);
-    //     bpf_prog_put(__bpf_prog_exit);
+    //     bpf_prog_put(__ipt_bpf_prog_entry);
+    //     bpf_prog_put(__ipt_bpf_prog_exit);
     //     return ret;
     // }
 
-    if (unlikely(0 != (ret = __bpf_check_path(&__bpf_prog_entry, bpf_prog_entry_path)))) {
+    if (unlikely(0 != (ret = __bpf_check_path(&__ipt_bpf_prog_entry, bpf_prog_entry_path)))) {
         pr_err("[X] iptables-trace, failed to get entry bpf prog, returned=%d\n", ret);
         return ret;
     }
 
-    if (unlikely(0 != (ret = __bpf_check_path(&__bpf_prog_exit, bpf_prog_exit_path)))) {
+    if (unlikely(0 != (ret = __bpf_check_path(&__ipt_bpf_prog_exit, bpf_prog_exit_path)))) {
         pr_err("[X] iptables-trace, failed to get exit bpf prog, returned=%d\n", ret);
-        bpf_prog_put(__bpf_prog_entry);
+        bpf_prog_put(__ipt_bpf_prog_entry);
         return ret;
     }
 
-    if (unlikely(0 != (ret = __bpf_check_path(&__bpf_prog_trace, bpf_prog_trace_path)))) {
+    if (unlikely(0 != (ret = __bpf_check_path(&__ipt_bpf_prog_trace, bpf_prog_trace_path)))) {
         pr_err("[X] iptables-trace, failed to get trace bpf prog, returned=%d\n", ret);
-        bpf_prog_put(__bpf_prog_entry);
-        bpf_prog_put(__bpf_prog_exit);
+        bpf_prog_put(__ipt_bpf_prog_entry);
+        bpf_prog_put(__ipt_bpf_prog_exit);
         return ret;
     }
 
@@ -222,9 +222,9 @@ L_unregister_kretprobes:
     unregister_kretprobe(&krp_ip6t_do_tables);
 
 L_put_bpf_progs:
-    bpf_prog_put(__bpf_prog_entry);
-    bpf_prog_put(__bpf_prog_exit);
-    bpf_prog_put(__bpf_prog_trace);
+    bpf_prog_put(__ipt_bpf_prog_entry);
+    bpf_prog_put(__ipt_bpf_prog_exit);
+    bpf_prog_put(__ipt_bpf_prog_trace);
 
     return ret;
 }
@@ -237,9 +237,9 @@ static void __exit ipt_trace_exit(void)
     unregister_kretprobe(&krp_ipt_do_tables);
     unregister_kretprobe(&krp_ip6t_do_tables);
 
-    bpf_prog_put(__bpf_prog_entry);
-    bpf_prog_put(__bpf_prog_exit);
-    bpf_prog_put(__bpf_prog_trace);
+    bpf_prog_put(__ipt_bpf_prog_entry);
+    bpf_prog_put(__ipt_bpf_prog_exit);
+    bpf_prog_put(__ipt_bpf_prog_trace);
 
     pr_info("[-] iptables-trace exited!\n");
 }

@@ -7,6 +7,8 @@ import (
 	"syscall"
 	"time"
 	"unsafe"
+
+	"github.com/tklauser/ps"
 )
 
 const (
@@ -210,8 +212,6 @@ func nullTerminatedStr(b []byte) string {
 func (e *perfEvent) outputIptablesInfo(ipt *iptablesInfo, trace *iptablesTrace) string {
 	var sb strings.Builder
 
-	_ = e.outputPktType(e.PktType)
-
 	if e.Flags&routeEventIptable == routeEventIptable {
 		pf := "PF_INET"
 		if ipt.Pf == 10 {
@@ -261,7 +261,21 @@ func (e *perfEvent) outputPktType(pktType uint8) string {
 	if s, ok := pktTypes[pktType]; ok {
 		return s
 	}
-	return ""
+	return fmt.Sprintf("UNK(%d)", pktType)
+}
+
+func (e *perfEvent) getProcessName(pid int) string {
+	p, err := ps.FindProcess(pid)
+	if err != nil {
+		return ""
+	}
+
+	return p.Command()
+}
+
+func printHeader() {
+	fmt.Printf("%-10s %-16s %-6s %s\t%s\n",
+		"TIME", "INTERFACE", "CPU", "PACKET", "PROCESS")
 }
 
 func (e *perfEvent) output(ipt *iptablesInfo, trace *iptablesTrace) string {
@@ -271,32 +285,20 @@ func (e *perfEvent) output(ipt *iptablesInfo, trace *iptablesTrace) string {
 	t := e.outputTimestamp()
 	s.WriteString(fmt.Sprintf("[%-8s] ", t))
 
-	// skb
-	s.WriteString(fmt.Sprintf("[0x%-16x] ", e.Skb))
-
-	// netns
-	s.WriteString(fmt.Sprintf("[%-10d] ", e.NetNS))
-
-	// pid
-	s.WriteString(fmt.Sprintf("%-8d ", e.Pid))
+	// interface
+	ifname := nullTerminatedStr(e.Ifname[:])
+	s.WriteString(fmt.Sprintf("%-16s ", ifname))
 
 	// cpu
 	s.WriteString(fmt.Sprintf("%-6d ", e.CPU))
 
-	// interface
-	ifname := nullTerminatedStr(e.Ifname[:])
-	s.WriteString(fmt.Sprintf("%-18s ", ifname))
-
-	// dest mac
-	destMac := net.HardwareAddr(e.DestMac[:]).String()
-	s.WriteString(fmt.Sprintf("%-18s ", destMac))
-
-	// ip len
-	s.WriteString(fmt.Sprintf("%-6d ", e.TotLen))
-
 	// pkt info
+	pktType := e.outputPktType(e.PktType)
 	pktInfo := e.outputPktInfo()
-	s.WriteString(fmt.Sprintf("%-54s ", pktInfo))
+	s.WriteString(fmt.Sprintf("[%s]%s\t ", pktType, pktInfo))
+
+	// pid
+	s.WriteString(fmt.Sprintf("%d(%s)\t", e.Pid, e.getProcessName(int(e.Pid))))
 
 	// iptables info
 	iptablesInfo := e.outputIptablesInfo(ipt, trace)

@@ -21,15 +21,15 @@ import (
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -no-global-types -cc clang iptablestrace ./ebpf/iptables-trace.c -- -D__TARGET_ARCH_x86 -I./ebpf/headers -Wall
 
 var usage = `examples:
-skbtracer-iptables                                      # trace all packets
-skbtracer-iptables --proto=icmp -H 1.2.3.4 --icmpid 22  # trace icmp packet with addr=1.2.3.4 and icmpid=22
-skbtracer-iptables --proto=tcp  -H 1.2.3.4 -P 22        # trace tcp  packet with addr=1.2.3.4:22
-skbtracer-iptables --proto=udp  -H 1.2.3.4 -P 22        # trace udp  packet wich addr=1.2.3.4:22
-skbtracer-iptables -t -T -p 1 -P 80 -H 127.0.0.1 --proto=tcp --icmpid=100 -N 10000
+iptables-trace                                      # trace all packets
+iptables-trace --proto=icmp -H 1.2.3.4 --icmpid 22  # trace icmp packet with addr=1.2.3.4 and icmpid=22
+iptables-trace --proto=tcp  -H 1.2.3.4 -P 22        # trace tcp  packet with addr=1.2.3.4:22
+iptables-trace --proto=udp  -H 1.2.3.4 -P 22        # trace udp  packet wich addr=1.2.3.4:22
+iptables-trace -t -T -p 1 -P 80 -H 127.0.0.1 --proto=tcp --icmpid=100 -N 10000
 `
 
 var rootCmd = cobra.Command{
-	Use:   "skbtracer-iptables",
+	Use:   "iptables-trace",
 	Short: "Trace any packet through iptables",
 	Long:  usage,
 	Run: func(cmd *cobra.Command, args []string) {
@@ -146,9 +146,7 @@ func runEbpf() {
 		log.Println("Received signal, exiting program...")
 	}()
 
-	fmt.Printf("%-10s %-20s %-12s %-8s %-6s %-18s %-18s %-6s %-54s %s\n",
-		"TIME", "SKB", "NETWORK_NS", "PID", "CPU", "INTERFACE", "DEST_MAC", "IP_LEN",
-		"PKT_INFO", "IPTABLES_INFO")
+	printHeader()
 
 	var event perfEvent
 	var ipt iptablesInfo
@@ -162,11 +160,11 @@ func runEbpf() {
 				return
 			}
 			log.Printf("Reading from perf event reader: %v", err)
+			return
 		}
 
 		if record.LostSamples != 0 {
 			log.Printf("Perf event ring buffer full, dropped %d samples", record.LostSamples)
-			continue
 		}
 
 		if err := binary.Read(bytes.NewBuffer(record.RawSample), binary.LittleEndian, &event); err != nil {
