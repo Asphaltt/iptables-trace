@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net"
 	"strings"
-	"syscall"
 	"time"
 	"unsafe"
 
@@ -242,28 +241,6 @@ func (e *perfEvent) outputIptablesInfo(ipt *iptablesInfo, trace *iptablesTrace) 
 	return sb.String()
 }
 
-func (e *perfEvent) outputPktType(pktType uint8) string {
-	// See: https://elixir.bootlin.com/linux/latest/source/include/uapi/linux/if_packet.h#L26
-	const (
-		PACKET_USER   = 6
-		PACKET_KERNEL = 7
-	)
-	pktTypes := map[uint8]string{
-		syscall.PACKET_HOST:      "HOST",
-		syscall.PACKET_BROADCAST: "BROADCAST",
-		syscall.PACKET_MULTICAST: "MULTICAST",
-		syscall.PACKET_OTHERHOST: "OTHERHOST",
-		syscall.PACKET_OUTGOING:  "OUTGOING",
-		syscall.PACKET_LOOPBACK:  "LOOPBACK",
-		PACKET_USER:              "USER",
-		PACKET_KERNEL:            "KERNEL",
-	}
-	if s, ok := pktTypes[pktType]; ok {
-		return s
-	}
-	return fmt.Sprintf("UNK(%d)", pktType)
-}
-
 func (e *perfEvent) getProcessName(pid int) string {
 	p, err := ps.FindProcess(pid)
 	if err != nil {
@@ -293,9 +270,8 @@ func (e *perfEvent) output(ipt *iptablesInfo, trace *iptablesTrace) string {
 	s.WriteString(fmt.Sprintf("%-6d ", e.CPU))
 
 	// pkt info
-	pktType := e.outputPktType(e.PktType)
 	pktInfo := e.outputPktInfo()
-	s.WriteString(fmt.Sprintf("[%s]%s\t ", pktType, pktInfo))
+	s.WriteString(fmt.Sprintf("%s\t ", pktInfo))
 
 	// pid
 	s.WriteString(fmt.Sprintf("%d(%s)\t", e.Pid, e.getProcessName(int(e.Pid))))
