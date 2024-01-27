@@ -6,6 +6,9 @@
 
 It requires 5.2+ kernel to run eBPF CO-RE.
 
+Meanwhile, `grep CONFIG_NETFILTER_XT_TARGET_TRACE /boot/config-$(uname -r)`
+should be `y` to run kernel module.
+
 ## Kernel module and kprobes and bpf progs
 
 It's because eBPF is unable to modify `skb->nf_trace` and `struct pt_regs`. But kernel module has the ability.
