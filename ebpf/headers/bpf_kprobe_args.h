@@ -40,7 +40,7 @@ regs_get_nth_argument(struct pt_regs *regs,
             return regs->regs[n];
         else
             return 0;
-#elifdef __TARGET_ARCH_x86
+#elif defined(__TARGET_ARCH_x86)
         n -= NR_REG_ARGUMENTS - 1;
         return regs_get_kernel_stack_nth_addr(regs, n);
 #else
