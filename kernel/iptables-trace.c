@@ -73,6 +73,10 @@ static int __bpf_check_path(struct bpf_prog **prog, char *path)
     return PTR_ERR_OR_ZERO(*prog);
 }
 
+#ifdef BPF_PROG_RUN
+#define bpf_prog_run(prog, ctx) BPF_PROG_RUN(prog, ctx)
+#endif
+
 static bool __run_bpf_prog_entry(struct pt_regs *regs)
 {
     return !!bpf_prog_run(__ipt_bpf_prog_entry, regs);
