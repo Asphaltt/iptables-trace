@@ -14,7 +14,6 @@ import (
 
 	"github.com/Asphaltt/iptables-trace/internal/assert"
 	"github.com/Asphaltt/iptables-trace/internal/ipttrace"
-	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/btf"
 	"github.com/cilium/ebpf/perf"
 	"github.com/spf13/cobra"
@@ -74,27 +73,12 @@ func runEbpf() {
 		return
 	}
 
-	if err := bpfSpec.RewriteConstants(map[string]interface{}{
-		"CFG": getBpfConfig(),
-	}); err != nil {
-		log.Printf("Failed to rewrite const for config: %v", err)
-		return
-	}
+	err = bpfSpec.Variables["CFG"].Set(getBpfConfig())
+	assert.NoErr(err, "Failed to set bpf config: %v")
 
 	var bpfObj iptablestraceObjects
-	if err := bpfSpec.LoadAndAssign(&bpfObj, &ebpf.CollectionOptions{
-		Programs: ebpf.ProgramOptions{
-			LogSize: ebpf.DefaultVerifierLogSize * 10,
-		},
-	}); err != nil {
-		var ve *ebpf.VerifierError
-		if errors.As(err, &ve) {
-			log.Printf("Failed to load bpf obj: %v\n%-50v", err, ve)
-		} else {
-			log.Printf("Failed to load bpf obj: %v", err)
-		}
-		return
-	}
+	err = bpfSpec.LoadAndAssign(&bpfObj, nil)
+	assert.NoVerifierErr(err, "Failed to load and assign bpf objects: %v")
 	defer bpfObj.Close()
 
 	btfSpec, err := btf.LoadKernelSpec()

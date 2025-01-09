@@ -47,7 +47,7 @@ struct config {
     u8 pad[3];
 } __attribute__((packed));
 
-static volatile const struct config CFG;
+volatile const struct config CFG;
 #define cfg (&CFG)
 
 union addr {
