@@ -7,7 +7,7 @@
 #include <linux/kprobes.h> // for bpf kprobe/kretprobe
 
 MODULE_LICENSE("GPL");
-MODULE_AUTHOR("Leon Hwang <le0nhwan9@gmail.com>");
+MODULE_AUTHOR("Leon Hwang <leonhwang@linux.dev>");
 MODULE_DESCRIPTION("A Module for iptables-trace");
 
 // static u32 bpf_prog_entry_fd = 0,
@@ -26,6 +26,8 @@ module_param(bpf_prog_trace_path, charp, 0);
 
 static int version_gte_5_16 = 0;
 module_param(version_gte_5_16, int, 0);
+
+static int have_ip6t_do_table = 0;
 
 #define MAX_SYMBOL_LEN 64
 static char symbol_ipt_do_table[MAX_SYMBOL_LEN] = "ipt_do_table";
@@ -131,6 +133,27 @@ static int __kprobe_prehandler_trace(struct kprobe *p, struct pt_regs *regs)
     return 0;
 }
 
+static void unregister_ip6t_do_tables(const bool is_kretprobe)
+{
+    if (!have_ip6t_do_table)
+        return;
+
+    if (is_kretprobe)
+        unregister_kretprobe(&krp_ip6t_do_tables);
+    else
+        unregister_kprobe(&kp_ip6t_do_tables);
+}
+
+static int register_ip6t_do_tables(const bool is_kretprobe)
+{
+    if (!have_ip6t_do_table)
+        return 0;
+
+    if (is_kretprobe)
+        return register_kretprobe(&krp_ip6t_do_tables);
+    return register_kprobe(&kp_ip6t_do_tables);
+}
+
 static int __init ipt_trace_init(void)
 {
     int ret;
@@ -190,11 +213,12 @@ static int __init ipt_trace_init(void)
     }
 
     ret = register_kretprobe(&krp_ip6t_do_tables);
-    if (unlikely(ret < 0)) {
+    if (unlikely(ret < 0 && ret != -ENOENT)) {
         unregister_kretprobe(&krp_ipt_do_tables);
         pr_err("[X] iptables-trace, failed to register krp_ip6t_do_tables, returned=%d\n", ret);
         goto L_put_bpf_progs;
     }
+    have_ip6t_do_table = ret == 0;
 
     ret = register_kprobe(&kp_ipt_do_tables);
     if (unlikely(ret < 0)) {
@@ -202,7 +226,7 @@ static int __init ipt_trace_init(void)
         goto L_unregister_kretprobes;
     }
 
-    ret = register_kprobe(&kp_ip6t_do_tables);
+    ret = register_ip6t_do_tables(false);
     if (unlikely(ret < 0)) {
         pr_err("[X] iptables-trace, failed to register kp_ip6t_do_tables, returned=%d\n", ret);
         unregister_kprobe(&kp_ipt_do_tables);
@@ -213,7 +237,7 @@ static int __init ipt_trace_init(void)
     if (unlikely(ret < 0)) {
         pr_err("[X] iptables-trace, failed to register kp_nf_log_trace, returned=%d\n", ret);
         unregister_kprobe(&kp_ipt_do_tables);
-        unregister_kprobe(&kp_ip6t_do_tables);
+        unregister_ip6t_do_tables(false);
         goto L_unregister_kretprobes;
     }
 
@@ -223,7 +247,7 @@ static int __init ipt_trace_init(void)
 
 L_unregister_kretprobes:
     unregister_kretprobe(&krp_ipt_do_tables);
-    unregister_kretprobe(&krp_ip6t_do_tables);
+    unregister_ip6t_do_tables(true);
 
 L_put_bpf_progs:
     bpf_prog_put(__ipt_bpf_prog_entry);
@@ -236,10 +260,10 @@ L_put_bpf_progs:
 static void __exit ipt_trace_exit(void)
 {
     unregister_kprobe(&kp_ipt_do_tables);
-    unregister_kprobe(&kp_ip6t_do_tables);
+    unregister_ip6t_do_tables(false);
     unregister_kprobe(&kp_nf_log_trace);
     unregister_kretprobe(&krp_ipt_do_tables);
-    unregister_kretprobe(&krp_ip6t_do_tables);
+    unregister_ip6t_do_tables(true);
 
     bpf_prog_put(__ipt_bpf_prog_entry);
     bpf_prog_put(__ipt_bpf_prog_exit);

@@ -12,7 +12,10 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/Asphaltt/iptables-trace/internal/assert"
+	"github.com/Asphaltt/iptables-trace/internal/ipttrace"
 	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/btf"
 	"github.com/cilium/ebpf/perf"
 	"github.com/spf13/cobra"
 	"golang.org/x/sys/unix"
@@ -94,11 +97,14 @@ func runEbpf() {
 	}
 	defer bpfObj.Close()
 
-	isHighVersion, err := isKernelVersionGte_5_16()
-	if err != nil {
-		log.Printf("Failed to check kernel version: %v", err)
-		return
+	btfSpec, err := btf.LoadKernelSpec()
+	assert.NoErr(err, "Failed to load kernel btf spec: %v")
+
+	isHighVersion, err := ipttrace.IsIptDoTableNew(btfSpec)
+	if err != nil && errors.Is(err, ipttrace.ErrNotFound) {
+		log.Fatalln("ipt_do_table not found in kernel btf spec")
 	}
+	assert.NoErr(err, "Failed to check ipt_do_table btf spec: %v")
 
 	kIptDoTable := bpfObj.K_iptDoTable
 	if !isHighVersion {
