@@ -113,9 +113,11 @@ __ipt_do_table_trace(struct pt_regs *ctx,
 static __noinline int
 __ipt_do_table_out(struct pt_regs *ctx, uint verdict)
 {
-    u64 pid_tgid;
-    u64 ipt_delay;
+    const struct nf_hook_state *state;
     struct ipt_do_table_args *args;
+    struct xt_table *table;
+    u64 ipt_delay;
+    u64 pid_tgid;
 
     pid_tgid = bpf_get_current_pid_tgid();
     args = bpf_map_lookup_and_delete(&skbtracer_ipt, &pid_tgid);
@@ -134,8 +136,9 @@ __ipt_do_table_out(struct pt_regs *ctx, uint verdict)
     event->flags |= SKBTRACER_EVENT_IPTABLE;
 
     ipt_delay = bpf_ktime_get_ns() - args->start_ns;
-    set_iptables_info(args->table, args->state, (u32)verdict, ipt_delay,
-        &event->ipt_info);
+    table = args->table;
+    state = args->state;
+    set_iptables_info(table, state, (u32)verdict, ipt_delay, &event->ipt_info);
 
     bpf_perf_event_output(ctx, &skbtracer_event, BPF_F_CURRENT_CPU, event,
         sizeof(struct event_t));
@@ -197,4 +200,80 @@ int BPF_KPROBE(k_nf_log_trace, struct net *net, u_int8_t pf, unsigned int hooknu
 
     return __ipt_do_table_trace(ctx, pf, hooknum, skb, in, out, tablename,
         chainname, rulenum);
+}
+
+SEC("kprobe/nft_do_chain")
+int BPF_KPROBE(k_nft_do_chain, struct nft_pktinfo *pkt, void *priv)
+{
+    struct nft_chain *chain = (struct nft_chain *)priv;
+    struct sk_buff *skb;
+    u64 pid_tgid;
+
+    pid_tgid = bpf_get_current_pid_tgid();
+    bpf_probe_read_kernel(&skb, sizeof(skb), (void *) pkt);
+
+    if (filter_pid(pid_tgid >> 32) || filter_netns(skb) || filter_l3_and_l4_info(skb))
+        return false;
+
+    struct ipt_do_table_args args = {
+        .skb = skb,
+        .chain = chain,
+    };
+
+    args.start_ns = bpf_ktime_get_ns();
+    bpf_map_update_elem(&skbtracer_ipt, &pid_tgid, &args, BPF_ANY);
+
+    return BPF_OK;
+}
+
+SEC("kretprobe/nft_do_chain")
+int BPF_KRETPROBE(kr_nft_do_chain, uint verdict)
+{
+    struct ipt_do_table_args *args;
+    struct nft_trace_t *trace;
+    struct nft_table *table;
+    struct nft_chain *chain;
+    struct event_t *event;
+    u64 ipt_delay;
+    u64 pid_tgid;
+    char *name;
+
+    pid_tgid = bpf_get_current_pid_tgid();
+    args = bpf_map_lookup_and_delete(&skbtracer_ipt, &pid_tgid);
+    if (!args)
+        return BPF_OK;
+
+    event = GET_EVENT_BUF();
+    if (!event)
+        return BPF_OK;
+
+    __builtin_memset(event, 0, sizeof(*event));
+
+    if (!do_trace_skb(event, ctx, args->skb))
+        return BPF_OK;
+
+    event->flags |= SKBTRACER_EVENT_NFT_CHAIN;
+
+    event->start_ns = args->start_ns;
+    ipt_delay = bpf_ktime_get_ns() - args->start_ns;
+
+    chain = args->chain;
+    trace = &event->nft_info;
+    // BPF_CORE_READ_INTO(&name, chain, table, name);
+    bpf_probe_read_kernel(&table, sizeof(table),
+                          (void *)chain + offsetof(struct nft_chain, table));
+    bpf_probe_read_kernel(&name, sizeof(name),
+                          (void *)table + offsetof(struct nft_table, name));
+    bpf_probe_read_kernel_str(trace->tablename, XT_TABLE_MAXNAMELEN, name);
+    // BPF_CORE_READ_INTO(&name, chain, name);
+    bpf_probe_read_kernel(&name, sizeof(name),
+                          (void *)chain + offsetof(struct nft_chain, name));
+    bpf_probe_read_kernel_str(trace->chainname, XT_TABLE_MAXNAMELEN, name);
+    trace->delay = ipt_delay;
+    trace->verdict = verdict;
+
+    bpf_perf_event_output(ctx, &skbtracer_event, BPF_F_CURRENT_CPU, event,
+                          sizeof(struct event_t));
+
+    return BPF_OK;
 }

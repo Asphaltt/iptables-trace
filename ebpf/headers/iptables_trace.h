@@ -88,8 +88,8 @@ struct icmp_info_t {
 
 struct iptables_info_t {
     char tablename[XT_TABLE_MAXNAMELEN];
-    u32 verdict;
     u64 delay;
+    u32 verdict;
     u8 hook;
     u8 pf;
     u8 pad[2];
@@ -104,6 +104,13 @@ struct iptables_trace_t {
     u32 hooknum;
     u8 pf;
     u8 pad[3];
+} __attribute__((packed));
+
+struct nft_trace_t {
+    char tablename[XT_TABLE_MAXNAMELEN];
+    char chainname[XT_TABLE_MAXNAMELEN];
+    u64 delay;
+    u32 verdict;
 } __attribute__((packed));
 
 struct pkt_info_t {
@@ -130,6 +137,7 @@ struct event_t {
     union {
         struct iptables_info_t ipt_info;
         struct iptables_trace_t trace_info;
+        struct nft_trace_t nft_info;
     };
 } __attribute__((packed));
 
@@ -163,6 +171,7 @@ get_event_buf(void)
 #define SKBTRACER_EVENT_IF 0x01
 #define SKBTRACER_EVENT_IPTABLE 0x02
 #define SKBTRACER_EVENT_IPTABLES_TRACE 0x04
+#define SKBTRACER_EVENT_NFT_CHAIN 0x08
 
 struct {
     __uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
@@ -173,8 +182,9 @@ struct ipt_do_table_args {
     struct sk_buff *skb;
     const struct nf_hook_state *state;
     struct xt_table *table;
+    struct nft_chain *chain;
     u64 start_ns;
-} __attribute__((packed));
+} __attribute__((packed)) /* __attribute__((preserve_access_index)) */;
 
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
@@ -291,7 +301,7 @@ set_pkt_info(struct sk_buff *skb, struct pkt_info_t *pkt_info)
     struct net_device *dev = BPF_CORE_READ(skb, dev);
     pkt_info->len = BPF_CORE_READ(skb, len);
     pkt_info->cpu = bpf_get_smp_processor_id();
-    pkt_info->pid = bpf_get_current_pid_tgid() & 0xffff;
+    pkt_info->pid = bpf_get_current_pid_tgid() >> 32;
     pkt_info->netns = get_netns(skb);
     pkt_info->pkt_type = get_pkt_type(skb);
 
@@ -357,17 +367,16 @@ set_icmp_info(struct sk_buff *skb, struct icmp_info_t *icmp_info)
 }
 
 static __always_inline void
-set_iptables_info(struct xt_table *table,
-    const struct nf_hook_state *state,
-    u32 verdict,
-    u64 delay,
-    struct iptables_info_t *ipt_info)
+set_iptables_info(struct xt_table *table, const struct nf_hook_state *state,
+                  u32 verdict, u64 delay, struct iptables_info_t *ipt_info)
 {
-    bpf_probe_read_str(&ipt_info->tablename, XT_TABLE_MAXNAMELEN, &table->name);
+    // BPF_CORE_READ_STR_INTO(&ipt_info->tablename, table, name); /* failed of bad CO-RE relocation */
+    bpf_probe_read_kernel_str(&ipt_info->tablename, XT_TABLE_MAXNAMELEN,
+                              (void *)table + offsetof(struct xt_table, name));
     BPF_CORE_READ_INTO(&ipt_info->hook, state, hook);
     BPF_CORE_READ_INTO(&ipt_info->pf, state, pf);
-    ipt_info->verdict = verdict;
     ipt_info->delay = delay;
+    ipt_info->verdict = verdict;
 }
 
 static __always_inline bool
@@ -376,7 +385,6 @@ filter_l3_and_l4_info(struct sk_buff *skb)
     u32 addr = cfg->ip;
     u8 proto = cfg->proto;
     u16 port = cfg->port;
-    u16 icmpid = cfg->icmpid;
 
     unsigned char *l3_header;
     unsigned char *l4_header;
@@ -393,7 +401,6 @@ filter_l3_and_l4_info(struct sk_buff *skb)
     u16 sport, dport;
 
     struct icmphdr ih;
-    u16 ev_icmpid;
     u8 proto_icmp_echo_request;
     u8 proto_icmp_echo_reply;
 
@@ -433,8 +440,11 @@ filter_l3_and_l4_info(struct sk_buff *skb)
     if (l4_proto == IPPROTO_ICMP || l4_proto == IPPROTO_ICMPV6) {
         l4_header = get_l4_header(skb);
         bpf_probe_read(&ih, sizeof(ih), l4_header);
-        ev_icmpid = ih.un.echo.id;
         if (ih.type != proto_icmp_echo_request && ih.type != proto_icmp_echo_reply)
+            return true;
+        if (cfg->proto && cfg->proto != IPPROTO_ICMP && cfg->proto != IPPROTO_ICMPV6)
+            return true;
+        if (cfg->icmpid && cfg->icmpid != ih.un.echo.id)
             return true;
     } else if (l4_proto == IPPROTO_TCP || l4_proto == IPPROTO_UDP) {
         l4_header = get_l4_header(skb);
@@ -455,17 +465,6 @@ filter_l3_and_l4_info(struct sk_buff *skb)
             dport = BPF_CORE_READ(uh, dest);
             return port != sport && port != dport;
         }
-    }
-
-    // filter icmp id
-    if (proto && icmpid) {
-        if (proto != IPPROTO_ICMP)
-            return false;
-        if (l4_proto != IPPROTO_ICMP && l4_proto != IPPROTO_ICMPV6)
-            return false;
-
-        if (icmpid != ev_icmpid)
-            return true;
     }
 
     return false;

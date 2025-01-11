@@ -14,7 +14,9 @@ import (
 
 	"github.com/Asphaltt/iptables-trace/internal/assert"
 	"github.com/Asphaltt/iptables-trace/internal/ipttrace"
+	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/btf"
+	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/perf"
 	"github.com/spf13/cobra"
 	"golang.org/x/sys/unix"
@@ -26,7 +28,7 @@ var usage = `examples:
 iptables-trace                                      # trace all packets
 iptables-trace --proto=icmp -H 1.2.3.4 --icmpid 22  # trace icmp packet with addr=1.2.3.4 and icmpid=22
 iptables-trace --proto=tcp  -H 1.2.3.4 -P 22        # trace tcp  packet with addr=1.2.3.4:22
-iptables-trace --proto=udp  -H 1.2.3.4 -P 22        # trace udp  packet wich addr=1.2.3.4:22
+iptables-trace --proto=udp  -H 1.2.3.4 -P 22        # trace udp  packet with addr=1.2.3.4:22
 iptables-trace -t -T -p 1 -P 80 -H 127.0.0.1 --proto=tcp --icmpid=100 -N 10000
 `
 
@@ -67,6 +69,19 @@ func runEbpf() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	btfSpec, err := btf.LoadKernelSpec()
+	assert.NoErr(err, "Failed to load kernel btf spec: %v")
+
+	kernelModules := map[string]*btf.Spec{}
+	iptBtfSpec, _ := btf.LoadKernelModuleSpec("ip_tables")
+	if iptBtfSpec != nil {
+		kernelModules["ip_tables"] = iptBtfSpec
+	}
+	nftBtfSpec, _ := btf.LoadKernelModuleSpec("nf_tables")
+	if nftBtfSpec != nil {
+		kernelModules["nf_tables"] = nftBtfSpec
+	}
+
 	bpfSpec, err := loadIptablestrace()
 	if err != nil {
 		log.Printf("Failed to load bpf spec: %v", err)
@@ -77,12 +92,22 @@ func runEbpf() {
 	assert.NoErr(err, "Failed to set bpf config: %v")
 
 	var bpfObj iptablestraceObjects
-	err = bpfSpec.LoadAndAssign(&bpfObj, nil)
+	err = bpfSpec.LoadAndAssign(&bpfObj, &ebpf.CollectionOptions{
+		Programs: ebpf.ProgramOptions{
+			KernelTypes:       btfSpec,
+			KernelModuleTypes: kernelModules,
+		},
+	})
 	assert.NoVerifierErr(err, "Failed to load and assign bpf objects: %v")
 	defer bpfObj.Close()
 
-	btfSpec, err := btf.LoadKernelSpec()
-	assert.NoErr(err, "Failed to load kernel btf spec: %v")
+	kprobeNft, err := link.Kprobe("nft_do_chain", bpfObj.K_nftDoChain, nil)
+	assert.NoErr(err, "Failed to attach kprobe nft_do_chain: %v")
+	defer kprobeNft.Close()
+
+	kretprobeNft, err := link.Kretprobe("nft_do_chain", bpfObj.KrNftDoChain, nil)
+	assert.NoErr(err, "Failed to attach kretprobe nft_do_chain: %v")
+	defer kretprobeNft.Close()
 
 	isHighVersion, err := ipttrace.IsIptDoTableNew(btfSpec)
 	if err != nil && errors.Is(err, ipttrace.ErrNotFound) {
@@ -141,6 +166,7 @@ func runEbpf() {
 	var event perfEvent
 	var ipt iptablesInfo
 	var trace iptablesTrace
+	var nft nftTrace
 
 	forever := cfg.CatchCount == 0
 	for n := cfg.CatchCount; forever || n > 0; n-- {
@@ -172,9 +198,14 @@ func runEbpf() {
 				log.Printf("Failed to parse iptables trace: %v", err)
 				continue
 			}
+		} else if event.Flags&routeEventNftChain == routeEventNftChain {
+			if err := binary.Read(bytes.NewReader(record.RawSample[sizeofEvent:]), binary.LittleEndian, &nft); err != nil {
+				log.Printf("Failed to parse nft trace: %v", err)
+				continue
+			}
 		}
 
-		fmt.Println(event.output(&ipt, &trace))
+		fmt.Println(event.output(&ipt, &trace, &nft))
 
 		select {
 		case <-ctx.Done():

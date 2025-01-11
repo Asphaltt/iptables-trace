@@ -26,6 +26,7 @@ const (
 	routeEventIf            = 0x0001
 	routeEventIptable       = 0x0002
 	routeEventIptablesTrace = 0x0004
+	routeEventNftChain      = 0x0008
 )
 
 var (
@@ -95,8 +96,8 @@ type icmpInfo struct {
 
 type iptablesInfo struct {
 	TableName [32]byte
-	Verdict   uint32
 	IptDelay  uint64
+	Verdict   uint32
 	Hook      uint8
 	Pf        uint8
 	Pad       [2]byte
@@ -111,6 +112,13 @@ type iptablesTrace struct {
 	HookNum   uint32
 	Pf        uint8
 	Pad       [3]uint8
+}
+
+type nftTrace struct {
+	TableName [32]byte
+	ChainName [32]byte
+	Delay     uint64
+	Verdict   uint32
 }
 
 type pktInfo struct {
@@ -208,7 +216,7 @@ func nullTerminatedStr(b []byte) string {
 	return *(*string)(unsafe.Pointer(&b))
 }
 
-func (e *perfEvent) outputIptablesInfo(ipt *iptablesInfo, trace *iptablesTrace) string {
+func (e *perfEvent) outputIptablesInfo(ipt *iptablesInfo, trace *iptablesTrace, nft *nftTrace) string {
 	var sb strings.Builder
 
 	if e.Flags&routeEventIptable == routeEventIptable {
@@ -237,6 +245,12 @@ func (e *perfEvent) outputIptablesInfo(ipt *iptablesInfo, trace *iptablesTrace) 
 		fmt.Fprintf(&sb, "ipttrace=[pf=%s in=%s out=%s table=%s chain=%s hook=%d rulenum=%d]",
 			pf, in, out, table, chain, trace.HookNum, trace.RuleNum)
 	}
+	if e.Flags&routeEventNftChain == routeEventNftChain {
+		table, chain := nullTerminatedStr(nft.TableName[:]), nullTerminatedStr(nft.ChainName[:])
+
+		fmt.Fprintf(&sb, "nft=[table=%s chain=%s verdict=%s cost=%s]",
+			table, chain, nfVerdictName[nft.Verdict], time.Duration(nft.Delay))
+	}
 
 	return sb.String()
 }
@@ -255,7 +269,7 @@ func printHeader() {
 		"TIME", "INTERFACE", "CPU", "PACKET", "PROCESS")
 }
 
-func (e *perfEvent) output(ipt *iptablesInfo, trace *iptablesTrace) string {
+func (e *perfEvent) output(ipt *iptablesInfo, trace *iptablesTrace, nft *nftTrace) string {
 	var s strings.Builder
 
 	// time
@@ -277,7 +291,7 @@ func (e *perfEvent) output(ipt *iptablesInfo, trace *iptablesTrace) string {
 	s.WriteString(fmt.Sprintf("%d(%s)\t", e.Pid, e.getProcessName(int(e.Pid))))
 
 	// iptables info
-	iptablesInfo := e.outputIptablesInfo(ipt, trace)
+	iptablesInfo := e.outputIptablesInfo(ipt, trace, nft)
 	s.WriteString(iptablesInfo)
 
 	return s.String()
