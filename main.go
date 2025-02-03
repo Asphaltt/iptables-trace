@@ -30,6 +30,8 @@ iptables-trace --proto=icmp -H 1.2.3.4 --icmpid 22  # trace icmp packet with add
 iptables-trace --proto=tcp  -H 1.2.3.4 -P 22        # trace tcp  packet with addr=1.2.3.4:22
 iptables-trace --proto=udp  -H 1.2.3.4 -P 22        # trace udp  packet with addr=1.2.3.4:22
 iptables-trace -t -T -p 1 -P 80 -H 127.0.0.1 --proto=tcp --icmpid=100 -N 10000
+
+options:
 `
 
 var rootCmd = cobra.Command{
@@ -45,10 +47,11 @@ var rootCmd = cobra.Command{
 		runGops()
 		runEbpf()
 	},
+	DisableFlagsInUseLine: true,
 }
 
 func main() {
-	cobra.CheckErr(rootCmd.Execute())
+	assert.NoErr(rootCmd.Execute(), "Error: %v")
 }
 
 // runEbpf attaches the kprobes and prints the kprobes' info.
